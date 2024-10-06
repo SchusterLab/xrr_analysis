@@ -1,0 +1,39 @@
+# %%
+import os.path
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy
+import refnx #https://refnx.readthedocs.io/en/latest/installation.html
+from refnx.dataset import ReflectDataset, Data1D
+from refnx.analysis import Transform, CurveFitter, Objective, Model, Parameter
+from refnx.reflect import SLD, Slab, ReflectModel
+import time
+import mpld3 #you may need to pip install mpld3 to get this working - it allows zoom action on inline plots
+import seaborn as sns
+#pth = r'/Users/sph/Library/CloudStorage/GoogleDrive-circuitqed@gmail.com/My Drive/Projects/Materials/XRay/XRR/'
+path = os.getcwd()
+print(path)
+pth = '../Data/'
+img_pth = '../Outputs/'
+#!%load_ext autoreload
+#!%autoreload 2
+import matplotlib as mpl
+#!%matplotlib widget
+import glob 
+import ana_xrr
+colors = ['#4053d3', '#b51d14', '#ddb310','#348f42','#7e1e9c', '#75bbfd', '#cacaca']
+sns.set_palette(colors)
+# %%
+flist_lv = glob.glob('lv*.txt', root_dir=pth)
+flist_lv.sort()
+print(flist_lv)
+
+labs_lv = ['67 nm Al', '30 nm Al/AlOx/37 nm Al', 'Slow 50 nm Al/5x AlOx/20 nm Al', 'Fast 50 nm Al/5x AlOx/20 nm Al','80 nm Ta/8 nm Al/AlOx/50 nm Al','80 nm Ta/8 nm Al/AlOx/50 nm Al','80 nm Ta/8 nm Al/AlOx/50 nm Al redo','80 nm Ta/AlOx/150 nm Ta']
+flist_stan = glob.glob('su*.txt', root_dir=pth)
+flist_stan.sort()
+print(flist_stan)
+labs_stan = ['80 Nb/8 Al/AlOx/50 Al 9 T Static','80 Nb/8 Al/AlOx/50 Al 9 T Static Redo','80 Nb/8 Al/AlOx/3 Al/80 nm Nb 9 T Static','80 Nb/8 Al/AlOx/50 Al 1 T Static','80 Nb/8 Al/AlOx/50 Al 6 T Dynamic']
+
+flist = flist_lv + flist_stan
+labs = labs_lv + labs_stan
+# %%

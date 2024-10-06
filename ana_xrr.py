@@ -11,13 +11,14 @@ import mpld3 #you may need to pip install mpld3 to get this working - it allows 
 import seaborn as sns
 import copy
 import pandas as pd 
+from scipy import signal
 
 cfg_model = {'bkg': 3e-8, 'dq': 1, 'scale': 1, 'q_offset': 0}
-cfg_sld = {'al':22.425, 'nb':64.035, 'alox':28.419, 'nbox':17.819,'al2o3':33.38,'buff':14}
-cfg_isld = {'al':-0.411, 'nb':-3.928, 'alox':-0.37, 'nbox':-.3,'al2o3':-0.388,'buff':-0.2,'air':0}
+cfg_sld = {'al':22.425, 'nb':64.035, 'alox':27.419, 'nbox':38.204,'al2o3':33.38,'buff':16,'buff_low':4.5, 'buff_med':8}
+cfg_isld = {'al':-0.411, 'nb':-3.928, 'alox':-0.37, 'nbox':-.3,'al2o3':-0.388,'buff':-0.2,'air':0,'buff_low':-0.2, 'buff_med':-0.2}
 #cfg_isld = {'al':0, 'nb':0, 'alox':0, 'nbox':0,'al2o3':0,'buff':0,'air':0}
-cfg_rough = {'al':1, 'nb':1, 'alox':2, 'nbox':1,'al2o3':5,'buff':4}
-cfg_thk = {'al':200, 'nb':500, 'alox':10, 'nbox':15,'buff':20}
+cfg_rough = {'al':1, 'nb':1, 'alox':2, 'nbox':1,'al2o3':5,'buff':4,'buff_low':4,'buff_med':4}
+cfg_thk = {'al':200, 'nb':500, 'alox':7, 'nbox':10,'buff':10,'al2o3':np.inf,'buff_low':10,'buff_med':10}
 
 cfg_vary = {'bkg':True, 'dq':False, 'scale':True, 'q_offset':True, 
                 'al_thk':True, 'nb_thk':True, 'top_oxide_thk':True, 'bottom_oxide_thk':True, 
@@ -38,7 +39,8 @@ def save_text(string, path, name=''):
     text_file.close()
     return str(path_out)
 
-def loadRefData(path,x_start=None, x_end=None, qrng=None, use_err=False):
+# Load data 
+def loadRefData(path,x_start=None, x_end=None, qrng=None, coef=1.9, use_err=True):
     data = np.loadtxt(path) #load text
     if x_start is None:
         x_start = 0
@@ -48,17 +50,22 @@ def loadRefData(path,x_start=None, x_end=None, qrng=None, use_err=False):
     y = data[x_start:x_end,1].T/max(data[:,1])
     #conv t-th to q using 0.72769 A wavelength
     x_new = refnx.util.q(x/2, 0.72769)
-    x_err = data[x_start:x_end,2].T
+    if use_err:
+        x_err = data[x_start:x_end,2].T
     
     if qrng is not None:
         y = y[(x_new>qrng[0]) & (x_new<qrng[1])]
-        x_err = x_err[(x_new>qrng[0]) & (x_new<qrng[1])]
+        if use_err:
+            x_err = x_err[(x_new>qrng[0]) & (x_new<qrng[1])]        
         x_new = x_new[(x_new>qrng[0]) & (x_new<qrng[1])]                
-    compiled = (x_new,y)
-    y_err = y
-    x_err=x_err/100*x_new*2
     
-    compiled = (x_new,y, y_err, x_err)
+    if use_err: 
+        y_err = y
+        x_err=x_err/100*x_new*coef
+        compiled = (x_new,y, y_err, x_err)
+    else:
+        compiled = (x_new,y)
+
     #compiled = (x_new,y, y_err)
     #returns the ReflectDataset object
     #print (f"Model will fit:\nd_min: {min(x_new)} A\n"
@@ -66,6 +73,7 @@ def loadRefData(path,x_start=None, x_end=None, qrng=None, use_err=False):
 
     return ReflectDataset(compiled)
 
+# Print out data about the model 
 def generate_table(data):
     # Create a DataFrame from the provided data
     df = pd.DataFrame({
@@ -86,6 +94,7 @@ def generate_table(data):
     print("\nAdditional Parameters:")
     print(additional_params.to_string(index=False))
 
+
 def make_model_par(level, par):
     if 'rough' not in par:
         par['rough'] = None
@@ -98,6 +107,7 @@ def make_model_par(level, par):
     model = make_model(structure, cfg_mod)
     return structure, model
 
+# Takes in list of layers and info about properties, creates structure 
 def make_layer_stack(level, thick=None, rough=None, sld=None): 
     layer_list = level.split('/')
 
@@ -117,6 +127,7 @@ def make_layer_stack(level, thick=None, rough=None, sld=None):
     structure = Structure(layers)
     return structure
 
+# Fills in structural info 
 def make_layer(name, sld=None, thick=None, rough=None, material=None):
     # Name is unique name for this layer. If not unique, SLD will be linked to ohter layers with same name. 
     if sld is None: 
@@ -132,14 +143,16 @@ def make_layer(name, sld=None, thick=None, rough=None, material=None):
     l = SLD(sld+1j*isld, name = name)
     return l(thick, rough)
 
+# This provides model specfic components 
 def make_model(structure, cfg=cfg_model): 
     model = ReflectModel(structure, bkg=cfg['bkg'], dq=cfg['dq'], scale = cfg['scale'], q_offset=cfg['q_offset'])
-    model.bkg.setp(bounds = (1e-9, 5e-7), vary = cfg_vary['bkg']) #background
+    model.bkg.setp(bounds = (1e-9, 1e-7), vary = cfg_vary['bkg']) #background
     model.dq.setp(bounds = (0.001, 2.2), vary = cfg_vary['dq']) # due to error?
-    model.scale.setp(bounds = (0.8, 1.4), vary = cfg_vary['scale']) # maximum value
+    model.scale.setp(bounds = (0.8, 1.6), vary = cfg_vary['scale']) # maximum value
     model.q_offset.setp(bounds = (-.025, 0.025), vary = cfg_vary['q_offset']) # due to error? 
     return model 
 
+# Needs to be updated, meant to repeat scan n times; probably easier to just use for loops 
 def repeat_scans(file, level='alox/al', qrng=[0.025, 0.3], save_name='test', cfg_in={}, cfg_in2={}, cfg_sld_in={}, run_mc=False, SLD_rng=[1,0.3], plot=False, no_fit=False, careful=False,n=5, start_new=False):
     chi=[]
     chi_start=[]
@@ -157,8 +170,11 @@ def repeat_scans(file, level='alox/al', qrng=[0.025, 0.3], save_name='test', cfg
             par_min = par
     return obj_min, par_min, chi, chi_start
 
-def check_cat(level):
+# Check if layer is metal, oxide or buffer  
+def check_cat(level, thk):
     sld=[]
+    full_thk=[]
+    
     layer_list = level.split('/')
     ox_indices = [i+1 for i, layer in enumerate(layer_list) if 'ox' in layer]
     metal_indices = [i+1 for i, layer in enumerate(layer_list) if 'al' == layer or 'nb' == layer]
@@ -166,15 +182,30 @@ def check_cat(level):
     cat = {'ox':ox_indices, 'metal':metal_indices, 'buff':buff_indices}
     for m in metal_indices:
         sld.append(cfg_sld[layer_list[m-1]])
-    return cat, sld 
+    if len(thk)==len(layer_list):
+        full_thk = thk
+    else:         
+        mm=[m-1 for m in metal_indices]
+        j=0
+        for i, layer in enumerate(layer_list):
+            if i in mm:
+                full_thk.append(thk[j])
+                j+=1
+            else: 
+                full_thk.append(cfg_thk[layer])
 
+        
+    return cat, sld, full_thk
+
+# Main function for setting up model and running simulation
 def sim(file, level, params, qrng=[0.025, 0.3], plot=True, SLD_rng=[0.6, 0.15], careful=False, fit=True, multi=None, plot_init=False, img_path=None, run_mc=False, use_err=False): 
     # possible layer names are al, nb, nbox, alox, buff 
     fname = level.replace('/', '-')
+    cats, slds, thk = check_cat(level, params['thk'])
+    params['thk']= thk   
     structure, model = make_model_par(level, params)
-    cats, slds = check_cat(level)
-
-    data = loadRefData(file, qrng=qrng, use_err=use_err) #this function loads to the data and converts the x-data from 2-theta to q
+    
+    data = loadRefData(file, qrng=qrng, coef=params['x_err'], use_err=use_err) #this function loads to the data and converts the x-data from 2-theta to q
     objective = Objective(model, data, transform=Transform("logY"))   
     if fit is False and multi is None: 
         multi=False
@@ -204,8 +235,8 @@ def sim(file, level, params, qrng=[0.025, 0.3], plot=True, SLD_rng=[0.6, 0.15], 
                 s.thick.setp(bounds = (s.thick.value/2,1.5*s.thick.value), vary = True)
                 s.rough.setp(bounds = (s.rough.value/2,1.5*s.rough.value), vary = True)
             else:
-                s.thick.setp(bounds = (0,45), vary = True)
-                s.rough.setp(bounds = (0,13), vary = True)
+                s.thick.setp(bounds = (0,40), vary = True)
+                s.rough.setp(bounds = (0,12), vary = True)
         elif i in cats['metal']:
             if careful: 
                 s.thick.setp(bounds = (0.9*s.thick.value,1.1*s.thick.value), vary = True)
@@ -214,24 +245,24 @@ def sim(file, level, params, qrng=[0.025, 0.3], plot=True, SLD_rng=[0.6, 0.15], 
                 j+=1
             else:
                 #s.thick.setp(bounds = (s.thick.value/2,s.thick.value*2), vary = True)
-                s.thick.setp(bounds = (0.9*s.thick.value,1.1*s.thick.value), vary = True)
+                s.thick.setp(bounds = (0.92*s.thick.value,1.08*s.thick.value), vary = True)
                 s.sld.real.setp(bounds=((1-SLD_rng[1])*s.sld.real.value,(1+SLD_rng[1])*s.sld.real.value), vary=True)
-                s.rough.setp(bounds = (0,10), vary = True)
+                s.rough.setp(bounds = (0,12), vary = True)
         elif i in cats['buff']:
             s.sld.real.setp(bounds=((1-SLD_rng[0])*s.sld.real.value,(1+SLD_rng[0])*s.sld.real.value), vary=True)
             if careful: 
                 s.thick.setp(bounds = (0.7*s.thick.value,1.3*s.thick.value), vary = True)
                 s.rough.setp(bounds = (s.rough.value/2,1.5*s.rough.value), vary = True)
             else:
-                s.thick.setp(bounds = (0,40), vary = True)
-                s.rough.setp(bounds = (0,30), vary = True)
+                s.thick.setp(bounds = (0,55), vary = True)
+                s.rough.setp(bounds = (0,15), vary = True)
 
         rough = params['sub_rough_max']
         structure[-1].rough.setp(bounds = (0,rough), vary = True)
-    print(objective.chisqr())
+    #print(objective.chisqr())
     if fit:
         fitter = CurveFitter(objective)
-        fitter.fit("differential_evolution", maxiter=2000, tol=0.005, mutation=(0.5,1.2))
+        fitter.fit("differential_evolution")#, maxiter=2000, tol=0.005, mutation=(0.5,1.2))
 
         if plot:
             plot_obj([objective], [''], path=img_path, fname=fname, save=save)
@@ -255,6 +286,7 @@ def sim(file, level, params, qrng=[0.025, 0.3], plot=True, SLD_rng=[0.6, 0.15], 
     
     return objective, params
 
+# Perform monte carlo analysis 
 def mc_ana(objective, fitter):
     
     fitter.sample(400, pool=1)
@@ -263,8 +295,8 @@ def mc_ana(objective, fitter):
     objective.corner()
     print(objective)
     fig,ax = objective.model.structure.plot(samples = 100)
-    
 
+# Take in objective and refit; not sure it's that useful with this analysis type 
 def refit(objective, file, qrng=[0.025, 0.3], plot=True, reset=False, SLD_rng = [0.2, 0.2], fit=True, save=True, img_path=None, fname='', use_err=False): 
     data = loadRefData(file, qrng=qrng, use_err=use_err) #this function loads to the data and converts the x-data from 2-theta to q
     objective.data = data
@@ -296,6 +328,7 @@ def refit(objective, file, qrng=[0.025, 0.3], plot=True, reset=False, SLD_rng = 
 
     return objective, params
 
+# Save model parameters to a readable dict
 def process_objective(obj): 
     thk =[]
     rough =[]
@@ -320,6 +353,7 @@ def process_objective(obj):
     params['chisq'] = obj.chisqr()
     return params 
 
+# Compare model outputs by comparing names 
 def compare_models(pars):
     pp = {'sld':{}, 'thick':{}, 'rough':{},'chisq':[], 'dq - resolution':[], 'q_offset':[], 'scale':[], 'bkg':[]} 
     layer_list = pars[-1]['layers']
@@ -351,19 +385,28 @@ def compare_models(pars):
                     pp['sld'][l].append(p['sld'][index])
     return pp
 
+# Print warning if we're at the edge of the bounds
 def check_rng(par):
     if par.value > 0.95 * par.bounds.ub: 
         print(f"Warning: {par.name} is at the upper edge of its bounds")
     if par.value < 1.05 * par.bounds.lb:
         print(f"Warning: {par.name} is at the lower edge of its bounds")
 
+# If you have list with structure [[obj1, pars1], [obj2, pars2], ...], returns list of just pars 
 def collect_pars(out):
     full_pars = [None]*len(out)
     for i, o in enumerate(out): 
         full_pars[i]=[oo[1] for oo in o]
     return full_pars
 
-def plot_obj(obj, labs, multi=True, save=True, path=None, fname=''):
+def collect_obj(out):
+    full_obj = [None]*len(out)
+    for i, o in enumerate(out): 
+        full_obj[i]=[oo[0] for oo in o]
+    return full_obj
+
+# Plot model for one or more objectives
+def plot_obj(obj, labs=None, multi=True, save=True, path=None, fname='test', ind=0, psd=True):
 
     if multi: 
         #fig, ax = plt.subplots(2,2, figsize=(12,6))
@@ -373,30 +416,51 @@ def plot_obj(obj, labs, multi=True, save=True, path=None, fname=''):
 
         ax['a'].set_xlabel('q (1/Å)')
         ax['a'].set_ylabel('Normalized Counts')
-        ax['b'].set_xlabel('q (1/Å)')
-        ax['b'].set_ylabel('Residuals')
+        
         ax['c'].set_ylabel('SLD /$10^{-6} \\AA^{-2}$')
-        ax['c'].set_xlabel('distance / $\\AA$')
+        ax['c'].set_xlabel('Depth ($\\AA$)')
         if len(obj)==1:
             ax['a'].loglog(obj[0].data.x, obj[0].data.y, '.-', markersize=4, label='Data', color='#b51d14')
         else: 
-            ax['a'].loglog(obj[0].data.x, obj[0].data.y, '.-', markersize=4, label='Data', color='k')
+            ax['a'].loglog(obj[ind].data.x, obj[ind].data.y, '.-', markersize=4, label='Data', color='k')
         for l, objective in zip(labs,obj):
             ax['a'].semilogy(objective.data.x, objective.model(objective.data.x), label=l)
-            ax['b'].plot(objective.data.x, objective.residuals(), label=l)
+
+            
             ax['c'].plot(*objective.model.structure.sld_profile(), label=l)
-        ax['b'].axhline(y=0, color='black', linestyle='--')
-        ax['a'].legend()
-        if len(labs[0])>0: 
-            ax['b'].legend()
-            ax['c'].legend()
+            if psd: 
+                fs = 1/((max(objective.data.x) - min(objective.data.x)) / len(objective.data.x))
+                f, Pxx_den = signal.periodogram(objective.residuals(), fs)
+                #f, Pxx_den = signal.periodogram(np.log(objective.data.y), fs)
+                f = f[1:]
+                Pxx_den = Pxx_den[1:]
+                x_max = 250
+                inds = 5.3*f<x_max
+
+
+                ax['b'].semilogy(5.3*f[inds]/10, Pxx_den[inds],'.-')
+            else:
+                ax['b'].plot(objective.data.x, objective.residuals(), label=l)
+        
+        ax['a'].legend(frameon=False)
+        if not psd: 
+            ax['b'].set_xlabel('q (1/Å)')
+            ax['b'].set_ylabel('Residuals')
+            ax['b'].axhline(y=0, color='black', linestyle='--')
+        else:
+            ax['b'].set_xlabel('Thickness (nm)')
+            ax['b'].set_ylabel('PSD')
+
+        #if len(labs[0])>0: 
+        #    ax['b'].legend()
+        #    ax['c'].legend()
         fig.suptitle(fname)
     else: 
         fig = plt.figure()             
         plt.xlabel("q (1/Å)")
         plt.ylabel("Normalized Counts")
         #plt.loglog(data.x, model(data.x), linewidth=0.5, label='guess')
-        plt.loglog(obj[0].data.x, obj[0].data.y, '.-', markersize=4, label='Data', color='#b51d14')
+        plt.loglog(obj[ind].data.x, obj[ind].data.y, '.-', markersize=4, label='Data', color='#b51d14')
         for l, objective in zip(labs,obj):
             plt.semilogy(objective.data.x, objective.model(objective.data.x), label=l)
         
@@ -414,12 +478,32 @@ def plot_obj(obj, labs, multi=True, save=True, path=None, fname=''):
         plt.xlabel("distance / $\\AA$")
     
     fig.tight_layout()
-    plt.show()
     if save:
         save_fig(fig, path, fname)
+    plt.show()
 
+    #return fig
 
-    return fig
+def plot_obj_pane(obj, labs=None, save=True, path=None, fname='test', ind=0):
+
+    nmod = len(obj)
+    nrows = int(np.ceil(nmod/2))
+    fig, ax = plt.subplots(nrows,2, figsize=(12,nrows*3), sharex=True)
+    ax=ax.flatten()
+    #ax['a'].set_xlabel('q (1/Å)')
+    #ax['a'].set_ylabel('Normalized Counts')
+    
+    for a, l, objective in zip(ax, labs,obj):
+        a.loglog(obj[ind].data.x, obj[ind].data.y, '.-', markersize=3, label=l, color='#b51d14')
+        a.semilogy(objective.data.x, objective.model(objective.data.x), label=f'$\chi^2=${objective.chisqr():.1f}')        
+        a.legend(frameon=False)
+
+    fig.suptitle(fname)
+   
+    fig.tight_layout()
+    if save:
+        save_fig(fig, path, fname)
+    plt.show()
 
 def plot_vary(var, vals, name, level=1, cfg={}, q=None): 
     sns.set_palette('coolwarm',len(vals))
@@ -480,3 +564,47 @@ def plot_model(cfg={}, data=None, name=None, level='nb', q=None, ax=None, fig=No
     
     return fig, ax
     
+def psd(obj):
+    
+    plt.figure()
+    fs = 1/((max(obj.data.x) - min(obj.data.x)) / len(obj.data.x))
+    f, Pxx_den = signal.periodogram(obj.residuals(), fs)
+    plt.semilogy(f[1:]*2*np.pi, Pxx_den[1:],'.-')
+    #plt.ylim([1e-9, 1e0])
+    plt.xlabel('length scale [A]')
+    plt.ylabel('PSD [$V^2$/Hz]')
+    plt.show()
+
+def compare_pars(pars, save=True, img_path=None, fname='test'): 
+
+    pp=compare_models(pars)
+    nlays = len(pp['sld'].keys())
+
+    fig, ax = plt.subplots(3, nlays, figsize=(nlays*3, 8), sharex=True)
+
+    ax = ax.flatten()
+    for i, layer in enumerate(pp['sld'].keys()):
+        ax[i].plot(pp['sld'][layer], '.-', label=layer+' '+'sld')
+        ax[i+nlays].plot(pp['rough'][layer], '.-', label=layer+' '+'rough')
+        if i < nlays-1: 
+            ax[i+2*nlays].plot(pp['thick'][layer], '.-', label=layer+' '+'thick')
+        else: 
+            ax[i+2*nlays].plot(np.sum(pp['thick'][layer][0:-2]), '.-', label='total thick')
+
+    for a in ax: 
+        a.legend()
+
+    fig.tight_layout()
+
+    fig2, ax = plt.subplots(1,4, figsize=(12, 3))
+    ax[0].plot(pp['chisq'], '.-', label='chisq')
+    ax[1].semilogy(pp['bkg'], '.-', label='background')
+    ax[2].plot(pp['scale'], '.-', label='scale')
+    ax[3].plot(pp['q_offset'], '.-', label='q offset')
+    for a in ax: 
+        a.legend()
+    fig2.tight_layout()
+
+    if save:
+        save_fig(fig, img_path, fname+'_pars')
+        save_fig(fig, img_path, fname)
