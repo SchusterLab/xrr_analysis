@@ -14,11 +14,14 @@ import pandas as pd
 from scipy import signal
 
 cfg_model = {'bkg': 3e-8, 'dq': 1, 'scale': 1, 'q_offset': 0}
-cfg_sld = {'al':22.425, 'nb':64.035, 'alox':27.419, 'nbox':38.204,'al2o3':33.38,'buff':16,'buff_low':4.5, 'buff_med':8}
-cfg_isld = {'al':-0.411, 'nb':-3.928, 'alox':-0.37, 'nbox':-.3,'al2o3':-0.388,'buff':-0.2,'air':0,'buff_low':-0.2, 'buff_med':-0.2}
+cfg_sld = {'al':22.425, 'nb':64.035, 'alox':27.419, 'nbox':36.204,'hiox':50.2044,'al2o3':33.38,'buff':18,'buff_low':4.5, 'buff_med':10}
+cfg_isld = {'al':-0.411, 'nb':-3.928, 'alox':-0.37, 'nbox':-.3,'al2o3':-0.388,'buff':-0.2,'air':0,'buff_low':-0.2, 'buff_med':-0.2, 'hiox':-0.3}
 #cfg_isld = {'al':0, 'nb':0, 'alox':0, 'nbox':0,'al2o3':0,'buff':0,'air':0}
-cfg_rough = {'al':1, 'nb':1, 'alox':2, 'nbox':1,'al2o3':5,'buff':4,'buff_low':4,'buff_med':4}
-cfg_thk = {'al':200, 'nb':500, 'alox':7, 'nbox':10,'buff':10,'al2o3':np.inf,'buff_low':10,'buff_med':10}
+cfg_rough = {'al':1, 'nb':1, 'alox':2, 'nbox':1,'al2o3':5,'buff':4,'buff_low':4,'buff_med':4,'hiox':1}
+cfg_rough_max={'al':10, 'nb':10, 'alox':10, 'nbox':10,'al2o3':10,'buff':10,'buff_low':10,'buff_med':10}
+cfg_thk = {'al':200, 'nb':500, 'alox':7, 'nbox':10,'buff':10,'al2o3':np.inf,'buff_low':10,'buff_med':10, 'hiox':10}
+cfg_max_thk = {'al':500, 'nb':500, 'alox':50, 'nbox':50,'buff':50,'al2o3':np.inf,'buff_low':50,'buff_med':50, 'hiox':50}
+
 
 cfg_vary = {'bkg':True, 'dq':False, 'scale':True, 'q_offset':True, 
                 'al_thk':True, 'nb_thk':True, 'top_oxide_thk':True, 'bottom_oxide_thk':True, 
@@ -146,10 +149,10 @@ def make_layer(name, sld=None, thick=None, rough=None, material=None):
 # This provides model specfic components 
 def make_model(structure, cfg=cfg_model): 
     model = ReflectModel(structure, bkg=cfg['bkg'], dq=cfg['dq'], scale = cfg['scale'], q_offset=cfg['q_offset'])
-    model.bkg.setp(bounds = (1e-9, 1e-7), vary = cfg_vary['bkg']) #background
+    model.bkg.setp(bounds = (1e-9, 5e-8), vary = cfg_vary['bkg']) #background
     model.dq.setp(bounds = (0.001, 2.2), vary = cfg_vary['dq']) # due to error?
-    model.scale.setp(bounds = (0.8, 1.6), vary = cfg_vary['scale']) # maximum value
-    model.q_offset.setp(bounds = (-.025, 0.025), vary = cfg_vary['q_offset']) # due to error? 
+    model.scale.setp(bounds = (0.8, 1.4), vary = cfg_vary['scale']) # maximum value
+    model.q_offset.setp(bounds = (-.01, 0.01), vary = cfg_vary['q_offset']) # due to error? 
     return model 
 
 # Needs to be updated, meant to repeat scan n times; probably easier to just use for loops 
@@ -245,7 +248,7 @@ def sim(file, level, params, qrng=[0.025, 0.3], plot=True, SLD_rng=[0.6, 0.15], 
                 j+=1
             else:
                 #s.thick.setp(bounds = (s.thick.value/2,s.thick.value*2), vary = True)
-                s.thick.setp(bounds = (0.92*s.thick.value,1.08*s.thick.value), vary = True)
+                s.thick.setp(bounds = (0.87*s.thick.value,1.13*s.thick.value), vary = True)
                 s.sld.real.setp(bounds=((1-SLD_rng[1])*s.sld.real.value,(1+SLD_rng[1])*s.sld.real.value), vary=True)
                 s.rough.setp(bounds = (0,12), vary = True)
         elif i in cats['buff']:
@@ -262,7 +265,7 @@ def sim(file, level, params, qrng=[0.025, 0.3], plot=True, SLD_rng=[0.6, 0.15], 
     #print(objective.chisqr())
     if fit:
         fitter = CurveFitter(objective)
-        fitter.fit("differential_evolution")#, maxiter=2000, tol=0.005, mutation=(0.5,1.2))
+        fitter.fit("differential_evolution", maxiter=2000)#, tol=0.005, mutation=(0.5,1.2))
 
         if plot:
             plot_obj([objective], [''], path=img_path, fname=fname, save=save)
@@ -607,4 +610,4 @@ def compare_pars(pars, save=True, img_path=None, fname='test'):
 
     if save:
         save_fig(fig, img_path, fname+'_pars')
-        save_fig(fig, img_path, fname)
+        save_fig(fig2, img_path, fname)
