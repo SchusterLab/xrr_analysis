@@ -598,12 +598,27 @@ def collect_obj(out):
         full_obj[i] = [oo[0] for oo in o]
     return full_obj
 
-def collect_obj3(out):
-    full_obj = [[None] * len(out[0])]*len(out[0][0])
-    for i, o in enumerate(out):
-        for j, p in enumerate(o):
-            full_obj[i][j] = [oo[0] for oo in p]
-    return full_obj
+def rearrange_results(results, dims):
+    
+    results_3d = [[[None for _ in range(dims[0])] for _ in range(dims[1])] for _ in range(dims[2])]
+
+    for i in range(dims[0]):
+        for j in range(dims[1]):
+            for k in range(dims[2]):
+                results_3d[i][j][k] = results[i * dims[1]*dims[2] + j * dims[2] + k]
+
+    results_3d_swapped = [[[results_3d[i][k][j] for k in range(len(results_3d[i]))] for j in range(len(results_3d[i][0]))] for i in range(len(results_3d))]
+
+    full_obj = [[[None for _ in range(len(results_3d_swapped[0][0]))] for _ in range(len(results_3d_swapped[0]))] for _ in range(len(results_3d_swapped))]
+    full_par = [[[None for _ in range(len(results_3d_swapped[0][0]))] for _ in range(len(results_3d_swapped[0]))] for _ in range(len(results_3d_swapped))]
+
+    for i in range(len(results_3d_swapped)):
+        for j in range(len(results_3d_swapped[i])):
+            for k in range(len(results_3d_swapped[i][j])):
+                full_obj[i][j][k] = results_3d_swapped[i][j][k][0]
+                full_par[i][j][k] = results_3d_swapped[i][j][k][1]
+    
+    return results_3d_swapped, full_obj, full_par
 
 # Plot model for one or more objectives
 def plot_obj(
