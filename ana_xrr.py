@@ -98,7 +98,6 @@ def save_text(string, path, name=""):
     text_file.close()
     return str(path_out)
 
-
 # Load data
 def loadRefData(path, x_start=None, x_end=None, qrng=None, coef=1.9, use_err=True):
     data = np.loadtxt(path)  # load text
@@ -132,7 +131,6 @@ def loadRefData(path, x_start=None, x_end=None, qrng=None, coef=1.9, use_err=Tru
     #   f"d_max: {max(x_new)} A\n")
 
     return ReflectDataset(compiled)
-
 
 # Print out data about the model
 def generate_table(data):
@@ -171,7 +169,7 @@ def generate_table(data):
     print("\nAdditional Parameters:")
     print(additional_params.to_string(index=False))
 
-
+# 
 def make_model_par(level, par):
     if "rough" not in par:
         par["rough"] = None
@@ -190,7 +188,6 @@ def make_model_par(level, par):
     }
     model = make_model(structure, cfg_mod)
     return structure, model
-
 
 # Takes in list of layers and info about properties, creates structure
 def make_layer_stack(level, thick=None, rough=None, sld=None):
@@ -214,7 +211,6 @@ def make_layer_stack(level, thick=None, rough=None, sld=None):
     structure = Structure(layers)
     return structure
 
-
 # Fills in structural info
 def make_layer(name, sld=None, thick=None, rough=None, material=None):
     # Name is unique name for this layer. If not unique, SLD will be linked to ohter layers with same name.
@@ -230,7 +226,6 @@ def make_layer(name, sld=None, thick=None, rough=None, material=None):
         isld = cfg_isld[material]
     l = SLD(sld + 1j * isld, name=name)
     return l(thick, rough)
-
 
 # This provides model specfic components
 def make_model(structure, cfg=cfg_model):
@@ -248,7 +243,6 @@ def make_model(structure, cfg=cfg_model):
         bounds=(-0.01, 0.01), vary=cfg_vary["q_offset"]
     )  # due to error?
     return model
-
 
 # Needs to be updated, meant to repeat scan n times; probably easier to just use for loops
 def repeat_scans(
@@ -296,7 +290,6 @@ def repeat_scans(
             par_min = par
     return obj_min, par_min, chi, chi_start
 
-
 # Check if layer is metal, oxide or buffer
 def check_cat(level, thk):
     sld = []
@@ -325,7 +318,6 @@ def check_cat(level, thk):
 
     return cat, sld, full_thk
 
-
 # Main function for setting up model and running simulation
 def sim(
     file,
@@ -344,6 +336,9 @@ def sim(
 ):
     # possible layer names are al, nb, nbox, alox, buff
     fname = level.replace("/", "-")
+    fsimp = os.path.splitext(os.path.basename(file))[0]
+    qm = qrng[1] * 100
+    fname = fsimp + "_" + fname + f"_{qm:.0f}"
     cats, slds, thk = check_cat(level, params["thk"])
     params["thk"] = thk
     structure, model = make_model_par(level, params)
@@ -459,7 +454,6 @@ def sim(
 
     return objective, params
 
-
 # Perform monte carlo analysis
 def mc_ana(objective, fitter):
 
@@ -469,7 +463,6 @@ def mc_ana(objective, fitter):
     objective.corner()
     print(objective)
     fig, ax = objective.model.structure.plot(samples=100)
-
 
 # Take in objective and refit; not sure it's that useful with this analysis type
 def refit(
@@ -517,7 +510,6 @@ def refit(
 
     return objective, params
 
-
 # Save model parameters to a readable dict
 def process_objective(obj):
     thk = []
@@ -542,7 +534,6 @@ def process_objective(obj):
         params[obj.parameters[0][i].name] = obj.parameters[0][i].value
     params["chisq"] = obj.chisqr()
     return params
-
 
 # Compare model outputs by comparing names
 def compare_models(pars):
@@ -586,14 +577,12 @@ def compare_models(pars):
                     pp["sld"][l].append(p["sld"][index])
     return pp
 
-
 # Print warning if we're at the edge of the bounds
 def check_rng(par):
     if par.value > 0.95 * par.bounds.ub:
         print(f"Warning: {par.name} is at the upper edge of its bounds")
     if par.value < 1.05 * par.bounds.lb:
         print(f"Warning: {par.name} is at the lower edge of its bounds")
-
 
 # If you have list with structure [[obj1, pars1], [obj2, pars2], ...], returns list of just pars
 def collect_pars(out):
@@ -609,6 +598,12 @@ def collect_obj(out):
         full_obj[i] = [oo[0] for oo in o]
     return full_obj
 
+def collect_obj3(out):
+    full_obj = [[None] * len(out[0])]*len(out[0][0])
+    for i, o in enumerate(out):
+        for j, p in enumerate(o):
+            full_obj[i][j] = [oo[0] for oo in p]
+    return full_obj
 
 # Plot model for one or more objectives
 def plot_obj(
@@ -788,35 +783,31 @@ def plot_vary(var, vals, name, level=1, cfg={}, q=None):
     fig2.savefig(name + "2.png")
 
 
-def plot_model(cfg={}, data=None, name=None, level="nb", q=None, ax=None, fig=None):
-
-    if q is None:
-        q = np.linspace(1e-2, 1, 5000)
-
+def plot_model(level, params, q=None, img_path=None, ax=None): 
+    fname = level.replace("/", "-")
+    cats, slds, thk = check_cat(level, params["thk"])
+    params["thk"] = thk
+    structure, model = make_model_par(level, params)
+    if img_path is None:
+        save = False  
     if ax is None:
-        fig, ax = plt.subplots(1, 1)
-
-    model = make_model_nb(level, cfg)
-
-    ax.semilogy(q, model(q), linewidth=0.5, label=name)
-    if data is not None:
-        ax.semilogy(
-            data.x,
-            data.y,
-            ".-",
-            color="#b51d14",
-            linewidth=0.5,
-            markersize=4,
-            label=name,
-        )
+        fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+    if q is None:
+        q = np.linspace(2e-2, 1.4, 5000)
+    ax.semilogy(q, model(q), label=level, linewidth=0.5)
     ax.legend()
-    fig.tight_layout()
-    # if name is not None:
-    # fig.suptitle(name)
 
-    # fig.savefig(name+'.png')
-
-    return fig, ax
+    # if data is not None:
+    #     ax.semilogy(
+    #         data.x,
+    #         data.y,
+    #         ".-",
+    #         color="#b51d14",
+    #         linewidth=0.5,
+    #         markersize=4,
+    #         label=name,
+    #     )
+    return ax
 
 
 def psd(obj):
