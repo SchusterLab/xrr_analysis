@@ -12,14 +12,20 @@ from refnx.dataset import ReflectDataset  # type: ignore
 from refnx.reflect import SLD, ReflectModel, Structure  # type: ignore
 from scipy import signal
 
+
 cfg_model = {"bkg": 3e-8, "dq": 1, "scale": 1, "q_offset": 0}
 cfg_sld = {
     "al": 22.425,
     "nb": 65.035,
+    "ta": 112.93,
     "alox": 28.419,
     "nbox": 36.204,
     "hiox": 50.2044,
+    'taox': 55.2044,
     "al2o3": 33.38,
+    "sio2": 18.709,
+    "si": 19.83,
+    "ta2o5": 59.37,
     "buff": 18,
     "buff_low": 4.5,
     "buff_med": 10,
@@ -27,9 +33,14 @@ cfg_sld = {
 cfg_isld = {
     "al": -0.411,
     "nb": -3.928,
+    "ta": -10.71,
+    "ta2o5": -4.42,
+    "si": -0.104,
+    "sio2": -0.054,
     "alox": -0.37,
     "nbox": -0.3,
     "al2o3": -0.388,
+    "taox": -3.5,
     "buff": -0.2,
     "air": 0,
     "buff_low": -0.2,
@@ -40,8 +51,13 @@ cfg_isld = {
 cfg_rough = {
     "al": 1,
     "nb": 1,
+    "ta": 1,
+    "ta2o5": 1,
+    "si": 1,
+    "sio2": 1,
     "alox": 2,
     "nbox": 1,
+    "taox": 2,
     "al2o3": 5,
     "buff": 4,
     "buff_low": 4,
@@ -51,8 +67,10 @@ cfg_rough = {
 cfg_rough_max = {
     "al": 10,
     "nb": 10,
+    "ta": 10,
     "alox": 10,
     "nbox": 10,
+    "taox": 10,
     "al2o3": 10,
     "buff": 10,
     "buff_low": 10,
@@ -61,6 +79,7 @@ cfg_rough_max = {
 cfg_thk = {
     "al": 200,
     "nb": 500,
+    "ta": 500,
     "alox": 7,
     "nbox": 10,
     "buff": 10,
@@ -72,6 +91,7 @@ cfg_thk = {
 cfg_max_thk = {
     "al": 500,
     "nb": 500,
+    "ta": 500,
     "alox": 50,
     "nbox": 50,
     "buff": 50,
@@ -99,26 +119,28 @@ def save_text(string, path, name=""):
     return str(path_out)
 
 # Load data
-def loadRefData(path, x_start=None, x_end=None, qrng=None, coef=1.9, use_err=True):
-    data = np.loadtxt(path)  # load text
+def loadRefData(path, x_start=None, x_end=None, qrng=None, coef=1.9, x_err=None):
+    data = pd.read_csv(path)  # load text
     if x_start is None:
         x_start = 0
     if x_end is None:
         x_end = len(data)
-    x = data[x_start:x_end, 0].T
-    y = data[x_start:x_end, 1].T / max(data[:, 1])
+    x = data['tth'][x_start:x_end]
+    if x_err is not None: 
+        x_err = x_err[x_start:x_end]
+    y = data['Normalized'][x_start:x_end].map(lambda x : x / data['Normalized'].max())
     # conv t-th to q using 0.72769 A wavelength
-    x_new = refnx.util.q(x / 2, 0.72769)
-    if use_err:
-        x_err = data[x_start:x_end, 2].T
+    x_new = x.map(lambda x: refnx.util.q(x / 2, 0.72769))
+    #4 * np.pi * np.sin(np.radians(x/2)) / wavelength
+    compiled = (x_new, y)
 
     if qrng is not None:
         y = y[(x_new > qrng[0]) & (x_new < qrng[1])]
-        if use_err:
+        if x_err is not None:
             x_err = x_err[(x_new > qrng[0]) & (x_new < qrng[1])]
         x_new = x_new[(x_new > qrng[0]) & (x_new < qrng[1])]
 
-    if use_err:
+    if x_err is not None:
         y_err = y
         x_err = x_err / 100 * x_new * coef
         compiled = (x_new, y, y_err, x_err)
@@ -131,6 +153,19 @@ def loadRefData(path, x_start=None, x_end=None, qrng=None, coef=1.9, use_err=Tru
     #   f"d_max: {max(x_new)} A\n")
 
     return ReflectDataset(compiled)
+
+def standalone_xerr(x, factor=80):
+    # Calculate theta in radians
+    wavelength = 0.72769
+    theta_radians = 2 * np.arcsin((x * wavelength) / (4 * np.pi))
+    # Convert to degrees
+    cot = 1 / np.tan(theta_radians)
+    x_err = cot/factor
+    print ("Error at" ,(theta_radians[400] *180/np.pi) ," is" , x_err[400] , "%")
+
+    print ("Error at" ,(theta_radians[-1] *180/np.pi) ," is" , x_err[-1] , "%")
+    
+    return x_err
 
 # Print out data about the model
 def generate_table(data):
@@ -236,7 +271,7 @@ def make_model(structure, cfg=cfg_model):
         scale=cfg["scale"],
         q_offset=cfg["q_offset"],
     )
-    model.bkg.setp(bounds=(1e-9, 5e-8), vary=cfg_vary["bkg"])  # background
+    model.bkg.setp(bounds=(5e-10, 5e-8), vary=cfg_vary["bkg"])  # background
     model.dq.setp(bounds=(0.001, 2.2), vary=cfg_vary["dq"])  # due to error?
     model.scale.setp(bounds=(0.8, 1.4), vary=cfg_vary["scale"])  # maximum value
     model.q_offset.setp(
@@ -600,7 +635,7 @@ def collect_obj(out):
 
 def rearrange_results(results, dims):
     
-    results_3d = [[[None for _ in range(dims[0])] for _ in range(dims[1])] for _ in range(dims[2])]
+    results_3d = [[[None for _ in range(dims[2])] for _ in range(dims[1])] for _ in range(dims[0])]
 
     for i in range(dims[0]):
         for j in range(dims[1]):
