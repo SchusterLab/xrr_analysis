@@ -17,14 +17,15 @@ cfg_model = {"bkg": 3e-8, "dq": 1, "scale": 1, "q_offset": 0}
 cfg_sld = {
     "al": 22.425,
     "nb": 65.035,
-    "ta": 112.93,
+    "ta": 105.455,
     "alox": 28.419,
     "nbox": 36.204,
     "hiox": 50.2044,
     'taox': 55.2044,
+    'tasiox':80,
     "al2o3": 33.38,
-    "sio2": 18.709,
-    "si": 19.83,
+    "siox": 22.723,
+    "si": 20.071,
     "ta2o5": 59.37,
     "buff": 18,
     "buff_low": 4.5,
@@ -33,14 +34,15 @@ cfg_sld = {
 cfg_isld = {
     "al": -0.411,
     "nb": -3.928,
-    "ta": -10.71,
-    "ta2o5": -4.42,
-    "si": -0.104,
-    "sio2": -0.054,
+    "ta": -8.5,
+    "ta2o5": -3.542,
+    "si": -0.458,
+    "siox": -0.294,
     "alox": -0.37,
     "nbox": -0.3,
     "al2o3": -0.388,
     "taox": -3.5,
+    "tasiox": -4,
     "buff": -0.2,
     "air": 0,
     "buff_low": -0.2,
@@ -54,10 +56,11 @@ cfg_rough = {
     "ta": 1,
     "ta2o5": 1,
     "si": 1,
-    "sio2": 1,
+    "siox": 1,
     "alox": 2,
     "nbox": 1,
     "taox": 2,
+    "tasiox":8,
     "al2o3": 5,
     "buff": 4,
     "buff_low": 4,
@@ -70,7 +73,9 @@ cfg_rough_max = {
     "ta": 10,
     "alox": 10,
     "nbox": 10,
-    "taox": 10,
+    "taox": 20,
+    "tasiox": 25,
+    'siox':30,
     "al2o3": 10,
     "buff": 10,
     "buff_low": 10,
@@ -80,10 +85,14 @@ cfg_thk = {
     "al": 200,
     "nb": 500,
     "ta": 500,
+    "tasiox":20,
+    'taox':50,
     "alox": 7,
     "nbox": 10,
+    'siox':10,
     "buff": 10,
     "al2o3": np.inf,
+    'si': np.inf,
     "buff_low": 10,
     "buff_med": 10,
     "hiox": 10,
@@ -92,6 +101,7 @@ cfg_max_thk = {
     "al": 500,
     "nb": 500,
     "ta": 500,
+    "tasiox": 100,
     "alox": 50,
     "nbox": 50,
     "buff": 50,
@@ -205,7 +215,7 @@ def generate_table(data):
     print(additional_params.to_string(index=False))
 
 # 
-def make_model_par(level, par):
+def make_model_par(level, par, use_err=False):
     if "rough" not in par:
         par["rough"] = None
     if "thk" not in par:
@@ -221,7 +231,7 @@ def make_model_par(level, par):
         "q_offset": par["q_offset"],
         "dq": par["dq - resolution"],
     }
-    model = make_model(structure, cfg_mod)
+    model = make_model(structure, cfg_mod, use_err)
     return structure, model
 
 # Takes in list of layers and info about properties, creates structure
@@ -263,7 +273,7 @@ def make_layer(name, sld=None, thick=None, rough=None, material=None):
     return l(thick, rough)
 
 # This provides model specfic components
-def make_model(structure, cfg=cfg_model):
+def make_model(structure, cfg=cfg_model, use_err=False):
     model = ReflectModel(
         structure,
         bkg=cfg["bkg"],
@@ -272,10 +282,14 @@ def make_model(structure, cfg=cfg_model):
         q_offset=cfg["q_offset"],
     )
     model.bkg.setp(bounds=(5e-10, 5e-8), vary=cfg_vary["bkg"])  # background
+    if use_err: 
+        cfg_vary['dq']=False
+    else:
+        cfg_vary['dq']=True
     model.dq.setp(bounds=(0.001, 2.2), vary=cfg_vary["dq"])  # due to error?
-    model.scale.setp(bounds=(0.8, 1.4), vary=cfg_vary["scale"])  # maximum value
+    model.scale.setp(bounds=(0.4, 1.2), vary=cfg_vary["scale"])  # maximum value
     model.q_offset.setp(
-        bounds=(-0.01, 0.01), vary=cfg_vary["q_offset"]
+        bounds=(-0.02, 0.02), vary=cfg_vary["q_offset"]
     )  # due to error?
     return model
 
@@ -333,7 +347,7 @@ def check_cat(level, thk):
     layer_list = level.split("/")
     ox_indices = [i + 1 for i, layer in enumerate(layer_list) if "ox" in layer]
     metal_indices = [
-        i + 1 for i, layer in enumerate(layer_list) if "al" == layer or "nb" == layer
+        i + 1 for i, layer in enumerate(layer_list) if "al" == layer or "nb" == layer or "ta" == layer
     ]
     buff_indices = [i + 1 for i, layer in enumerate(layer_list) if "buff" in layer]
     cat = {"ox": ox_indices, "metal": metal_indices, "buff": buff_indices}
@@ -376,11 +390,15 @@ def sim(
     fname = fsimp + "_" + fname + f"_{qm:.0f}"
     cats, slds, thk = check_cat(level, params["thk"])
     params["thk"] = thk
-    structure, model = make_model_par(level, params)
+    structure, model = make_model_par(level, params, use_err=use_err)
 
-    data = loadRefData(
-        file, qrng=qrng, coef=params["x_err"], use_err=use_err
-    )  # this function loads to the data and converts the x-data from 2-theta to q
+    if use_err: 
+        data = loadRefData(file)
+        x_err = standalone_xerr(data.x)
+        data =loadRefData(file, qrng=qrng, coef=params['x_err'], x_err=x_err)
+    else:
+        data = loadRefData(file, qrng=qrng)
+        
     objective = Objective(model, data, transform=Transform("logY"))
     if fit is False and multi is None:
         multi = False
@@ -416,8 +434,8 @@ def sim(
                 s.thick.setp(bounds=(s.thick.value / 2, 1.5 * s.thick.value), vary=True)
                 s.rough.setp(bounds=(s.rough.value / 2, 1.5 * s.rough.value), vary=True)
             else:
-                s.thick.setp(bounds=(0, 40), vary=True)
-                s.rough.setp(bounds=(0, 12), vary=True)
+                s.thick.setp(bounds=(0, 100), vary=True)
+                s.rough.setp(bounds=(0, 25), vary=True)
         elif i in cats["metal"]:
             if careful:
                 s.thick.setp(
@@ -701,14 +719,14 @@ def plot_obj(
                     (max(objective.data.x) - min(objective.data.x))
                     / len(objective.data.x)
                 )
-                f, Pxx_den = signal.periodogram(objective.residuals(), fs)
-                # f, Pxx_den = signal.periodogram(np.log(objective.data.y), fs)
+                #f, Pxx_den = signal.periodogram(objective.residuals(), fs)
+                f, Pxx_den = signal.periodogram(np.log(objective.data.y), fs)
                 f = f[1:]
                 Pxx_den = Pxx_den[1:]
                 x_max = 250
                 inds = 5.3 * f < x_max
 
-                ax["b"].semilogy(5.3 * f[inds] / 10, Pxx_den[inds], ".-")
+                ax["b"].semilogy(5.3 * f / 10, Pxx_den, ".-")
             else:
                 ax["b"].plot(objective.data.x, objective.residuals(), label=l)
 
